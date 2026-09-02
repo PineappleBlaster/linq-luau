@@ -1,6 +1,7 @@
 [package]
 name = "pineappleblaster/linq-luau"
-version = "0.1.0"
+description = "A typed, lazy, chainable query API for Luau collections."
+version = "0.3.0"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
 license = "MIT"
