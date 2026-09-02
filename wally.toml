@@ -7,6 +7,6 @@ license = "MIT"
 authors = [
     "McRocketNuggets"
 ]
-repository = ""
+repository = "https://github.com/PineappleBlaster/linq-luau"
 
 [dependencies]
