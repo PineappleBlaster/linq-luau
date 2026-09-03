@@ -250,7 +250,7 @@ const function getCapacity(source : Source, segments : { ExecutionSegment })
 	return capacity
 end
 
--- Fast path for a single fused FilterSegment.
+-- Fast path for a single fused FilterSegment => ToArray. 
 const function filterFast(source : { any }, segment : FilterSegment) : { any }
 	local output = table.create(#source)
 	local outputNDX = 0
@@ -272,7 +272,7 @@ const function filterFast(source : { any }, segment : FilterSegment) : { any }
 	return output
 end
 
--- Fast path for a single fused MapSegment.
+-- Fast path for a single fused MapSegment => ToArray. 
 const function selectFast(source : { any }, segment : MapSegment) : { any }
 	local output = table.create(#source)
 	local selector = segment.selector
@@ -311,7 +311,7 @@ const function windowFast(source : { any }, segment : WindowSegment) : { any }
 	return output
 end
 
--- Fast path for Filter -> Map.
+-- Fast path for Filter -> Map => ToArray.
 const function filterSelectFast(source : { any }, filterSegment : FilterSegment, mapSegment : MapSegment)
 	local output, outputNDX = table.create(#source), 0
 	local predicates, selector = filterSegment.predicates, mapSegment.selector
@@ -334,7 +334,7 @@ const function filterSelectFast(source : { any }, filterSegment : FilterSegment,
 	return output
 end
 
--- Fast path for Map -> Filter.
+-- Fast path for Map -> Filter => ToArray.
 const function selectFilterFast(source : { any }, mapSegment : MapSegment, filterSegment : FilterSegment)
 	local output, outputNDX = table.create(#source), 0
 	local selector, predicates = mapSegment.selector, filterSegment.predicates
@@ -358,7 +358,7 @@ const function selectFilterFast(source : { any }, mapSegment : MapSegment, filte
 	return output
 end
 
--- Fast path for Filter -> Map -> Filter.
+-- Fast path for Filter -> Map -> Filter => ToArray.
 const function filterSelectFilterFast(source : { any }, filterSegment1 : FilterSegment, mapSegment : MapSegment, filterSegment2 : FilterSegment)
 	local output, outputNDX = table.create(#source), 0
 	local predicates1, selector, predicates2 = filterSegment1.predicates, mapSegment.selector, filterSegment2.predicates
@@ -387,7 +387,7 @@ const function filterSelectFilterFast(source : { any }, filterSegment1 : FilterS
 	return output
 end
 
--- Fast path for Filter -> Map -> Window.
+-- Fast path for Filter -> Map -> Window => ToArray.
 const function filterSelectWindowFast(source : { any }, filterSegment : FilterSegment, mapSegment : MapSegment, windowSegment : WindowSegment) : { any }
 	local take, skip = windowSegment.take, windowSegment.skip
 	if take == 0 then return {} end
@@ -423,7 +423,7 @@ const function filterSelectWindowFast(source : { any }, filterSegment : FilterSe
 	return output
 end
 
--- Fast path for Map -> Filter -> Window.
+-- Fast path for Map -> Filter -> Window => ToArray.
 const function selectFilterWindowFast(source : { any }, mapSegment : MapSegment, filterSegment : FilterSegment, windowSegment : WindowSegment) : { any }
 	local take, skip = windowSegment.take, windowSegment.skip
 	if take == 0 then return {} end
@@ -457,7 +457,7 @@ const function selectFilterWindowFast(source : { any }, mapSegment : MapSegment,
 	return output
 end
 
--- Fast path for Filter -> Distinct -> Map.
+-- Fast path for Filter -> Distinct -> Map => ToArray.
 const function filterDistinctSelectFast(source : { any }, filterSegment : FilterSegment, distinctSegment : DistinctSegment, mapSegment : MapSegment)
 	local output, outputNDX = table.create(#source), 0
 	local predicates, keySelector, selector = filterSegment.predicates, distinctSegment.keySelector, mapSegment.selector
@@ -489,6 +489,221 @@ const function filterDistinctSelectFast(source : { any }, filterSegment : Filter
 	end
 
 	return output
+end
+
+-- Fast path for a single fused FilterSegment => First.
+const function filterFirstFast(source : { any }, filterSegment : FilterSegment)
+	local predicates = filterSegment.predicates
+
+	for i = 1, #source do
+		local value, include = source[i], true
+
+		for j = 1, #predicates do
+			if not predicates[j](value) then include = false break end
+		end
+		if include == true then return value end
+	end
+
+	return nil
+end
+
+-- Fast path for a single fused MapSegment => First.
+const function selectFirstFast(source : { any }, mapSegment : MapSegment)
+	local selector = mapSegment.selector
+
+	for i = 1, #source do
+		local mappedValue = selector(source[i])
+		validateSelector(mappedValue)
+
+		return mappedValue
+	end
+
+	return nil
+end
+
+-- Fast path for Filter -> Select => First.
+const function filterSelectFirstFast(source : { any }, filterSegment : FilterSegment, mapSegment : MapSegment)
+	local predicates, selector = filterSegment.predicates, mapSegment.selector
+	
+	for i = 1, #source do
+		local value, include = source[i], true
+		
+		for j = 1, #predicates do
+			if not predicates[j](value) then include = false break end
+		end
+		if include == false then continue end
+		
+		value = selector(value)
+		validateSelector(value)
+		
+		return value
+	end
+	
+	return nil
+end
+
+-- Fast path for a single fused FilterSegment => Any.
+const function filterAnyFast(source : { any }, filterSegment : FilterSegment)
+	local predicates = filterSegment.predicates
+	for i = 1, #source do
+		local value, include = source[i], true
+
+		for j = 1, #predicates do
+			if not predicates[j](value) then include = false break end
+		end
+		if include == true then return true end
+	end
+
+	return false
+end
+
+-- Fast path for a single fused FilterSegment => Count.
+const function filterCountFast(source : { any }, filterSegment : FilterSegment)
+	local predicates, count = filterSegment.predicates, 0
+	
+	for i = 1, #source do
+		local value, include = source[i], true
+		for j = 1, #predicates do
+			if not predicates[j](value) then include = false break end
+		end
+		if include == false then continue end
+		
+		count += 1
+	end
+	
+	return count
+end
+
+-- Fast path for a single fused FilterSegment => Sum.
+const function filterSumFast(source : { any }, filterSegment : FilterSegment)
+	local predicates, sum = filterSegment.predicates, 0
+	
+	for i = 1, #source do
+		local value, include = source[i], true
+		for j = 1, #predicates do
+			if not predicates[j](value) then include = false break end
+		end
+		if include == false then continue end
+
+		sum += value
+	end
+	
+	return sum
+end
+
+-- Fast path for a single fused MapSegment => Sum.
+const function selectSumFast(source : { any }, mapSegment : MapSegment)
+	local selector, sum = mapSegment.selector, 0
+	
+	for i = 1, #source do
+		local mappedValue = selector(source[i])
+		validateSelector(mappedValue)
+		
+		sum += mappedValue
+	end
+	
+	return sum
+end
+
+-- Fast path for Filter -> Select => Sum.
+const function filterSelectSumFast(source : { any }, filterSegment : FilterSegment, mapSegment : MapSegment)
+	local predicates, selector, sum = filterSegment.predicates, mapSegment.selector, 0
+	
+	for i = 1, #source do
+		local value, include = source[i], true
+		for j = 1, #predicates do
+			if not predicates[j](value) then include = false break end
+		end
+		if include == false then continue end
+		
+		value = selector(value)
+		validateSelector(value)
+		
+		sum += value
+	end
+	
+	return sum
+end
+
+--[=[
+	@private
+	@within LINQ
+
+	Attempts to execute a terminal operation through a specialized fast path based on the query's
+	source type and segment shape. Returns whether a matching fast path was found followed by that
+	terminal's result.
+
+	Fast paths bypass the general Producer/Push executor for common query shapes, allowing operations
+	such as `Filter -> First` or `Filter -> Count` to run as a single specialized loop without
+	intermediate allocations or per-stage dispatch. Unsupported shapes fall back to `_enumerate`.
+]=]
+const function tryFastTerminal(source : Source, segments : { ExecutionSegment }, terminal : string) : (boolean, any?)
+	local kind, values = source.kind, source.values
+	
+	if kind ~= "array" then return false, nil end
+	
+	local fastPath
+	
+	if #segments == 1 then
+		local segment = segments[1]
+		
+		if segment.kind == "filter" then
+			if terminal == "first" then
+				fastPath = filterFirstFast(values, segment)
+			elseif terminal == "any" then
+				fastPath = filterAnyFast(values, segment)
+			elseif terminal == "count" then
+				fastPath = filterCountFast(values, segment)
+			elseif terminal == "sum" then
+				fastPath = filterSumFast(values, segment)
+			elseif terminal == "toarray" then
+				fastPath = filterFast(values, segment)
+			end
+		elseif segment.kind == "map" then
+			if terminal == "first" then
+				fastPath = selectFirstFast(values, segment)
+			elseif terminal == "sum" then
+				fastPath = selectSumFast(values, segment)
+			elseif terminal == "toarray" then
+				fastPath = selectFast(values, segment)
+			end
+		elseif segment.kind == "window" then
+			if terminal == "toarray" then
+				fastPath = windowFast(values, segment)
+			end
+		end
+		
+	elseif #segments == 2 then
+		local first, second = segments[1], segments[2]
+		
+		if first.kind == "filter" and second.kind == "map" then
+			if terminal == "toarray" then
+				fastPath = filterSelectFast(values, first, second)
+			elseif terminal == "first" then
+				fastPath = filterSelectFirstFast(values, first, second)
+			elseif terminal == "sum" then
+				fastPath = filterSelectSumFast(values, first, second)
+			end
+		elseif first.kind == "map" and second.kind == "filter" then
+			if terminal == "toarray" then
+				fastPath = selectFilterFast(values, first, second)
+			end
+		end
+	elseif #segments == 3 then
+		local first, second, third = segments[1], segments[2], segments[3]
+
+		if first.kind == "filter" and second.kind == "map" and third.kind == "filter" then
+			fastPath = filterSelectFilterFast(values, first, second, third)
+		elseif first.kind == "filter" and second.kind == "map" and third.kind == "window" then
+			fastPath = filterSelectWindowFast(values, first, second, third)
+		elseif first.kind == "filter" and second.kind == "distinct" and third.kind == "map" then
+			fastPath = filterDistinctSelectFast(values, first, second, third)
+		elseif first.kind == "map" and second.kind == "filter" and third.kind == "window" then
+			fastPath = selectFilterWindowFast(values, first, second, third)
+		end
+	end
+	
+	return fastPath ~= nil, fastPath
 end
 
 --[=[
@@ -1110,39 +1325,8 @@ function LINQMethods.ToArray<T>(self : LINQImpl & LINQ<T>) : { T } | { Entry<any
 	end
 
 	if source.kind == "array" then -- array specific fast path branches
-		local values = source.values
-
-		if #segments == 1 then
-			local segment = segments[1]
-
-			if segment.kind == "filter" then
-				return filterFast(values, segment)
-			elseif segment.kind == "map" then
-				return selectFast(values, segment)
-			elseif segment.kind == "window" then
-				return windowFast(values, segment)
-			end
-		elseif #segments == 2 then
-			local first, second = segments[1], segments[2]
-
-			if first.kind == "filter" and second.kind == "map" then
-				return filterSelectFast(values, first, second)
-			elseif first.kind == "map" and second.kind == "filter" then
-				return selectFilterFast(values, first, second)
-			end
-		elseif #segments == 3 then
-			local first, second, third = segments[1], segments[2], segments[3]
-
-			if first.kind == "filter" and second.kind == "map" and third.kind == "filter" then
-				return filterSelectFilterFast(values, first, second, third)
-			elseif first.kind == "filter" and second.kind == "map" and third.kind == "window" then
-				return filterSelectWindowFast(values, first, second, third)
-			elseif first.kind == "filter" and second.kind == "distinct" and third.kind == "map" then
-				return filterDistinctSelectFast(values, first, second, third)
-			elseif first.kind == "map" and second.kind == "filter" and third.kind == "window" then
-				return selectFilterWindowFast(values, first, second, third)
-			end
-		end
+		local executed, result = tryFastTerminal(self._source, self._segments, "toarray")
+		if executed == true then return result end
 	end
 
 	-- general execution branch
@@ -1209,6 +1393,9 @@ function LINQMethods.FirstOrNil<T>(self : LINQImpl & LINQ<T>) : T? | Entry<any, 
 			Value = value
 		}
 	end
+	
+	local executed, result = tryFastTerminal(self._source, self._segments, "first")
+	if executed == true then return result end
 
 	local result = nil
 
@@ -1284,6 +1471,9 @@ function LINQMethods.Any<T>(self : LINQImpl & LINQ<T>) : boolean
 
 		return next(source.values) ~= nil
 	end
+	
+	local executed, result = tryFastTerminal(self._source, self._segments, "any")
+	if executed == true then return result end
 
 	local isFound = false
 
@@ -1313,6 +1503,9 @@ function LINQMethods.Count<T>(self : LINQImpl & LINQ<T>) : number
 
 		return count
 	end
+	
+	local executed, result = tryFastTerminal(self._source, self._segments, "count")
+	if executed == true then return result end
 
 	local count = 0
 
@@ -1378,6 +1571,13 @@ end
 	If `selector` is provided, its numeric result is summed instead.
 ]=]
 function LINQMethods.Sum<T>(self : LINQImpl & LINQ<T>, selector : NumberSelector<T>?) : number
+	if self._isEmpty == true then return 0 end
+
+	if selector == nil and #self._segments > 0 and self._source.kind == "array" then
+		local executed, result = tryFastTerminal(self._source, self._segments, "sum")
+		if executed == true then return result end
+	end
+
 	local sum = 0
 
 	self:_enumerate(function(value : any)
