@@ -1,12 +1,6 @@
 {
 	"name": "linq-luau",
 	"tree": {
-		"$className": "Folder",
-		"src": {
-			"$className": "Folder",
-			"linq-luau": {
-				"$path": "src/linq-luau"
-			}
-		}
+		"$path": "src/linq.luau"
 	}
 }
