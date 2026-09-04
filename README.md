@@ -32,7 +32,7 @@ local result = LINQ(workspace:GetDescendants())
 
 ```toml
 [dependencies]
-LINQ = "pineappleblaster/linq-lua@0.4.0"
+LINQ = "pineappleblaster/linq-lua@0.4.1"
 ```
 
 Then require it from your Wally packages directory:
