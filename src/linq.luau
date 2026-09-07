@@ -82,6 +82,9 @@ export type LINQ<T> = {
 	Max : (self : LINQ<T>, comparer : Comparer<T>?) -> T;
 	Sum : (self : LINQ<T>, selector : NumberSelector<T>?) -> number;
 	Average : (self : LINQ<T>, selector : NumberSelector<T>?) -> number;
+	
+	Intersect : (self : LINQ<T>, values : { T }) -> LINQ<T>;
+	Union : (self : LINQ<T>, values : { T }) -> LINQ<T>;
 }
 type LINQImpl = {
 	_source : Source;
@@ -156,6 +159,10 @@ type ConcatSegment = {
 	kind : "concat";
 	values : { any }
 }
+type IntersectSegment = {
+	kind : "intersect";
+	values : { any }
+}
 
 -- Describes one deferred operation in a query pipeline.
 --
@@ -167,7 +174,7 @@ type ConcatSegment = {
 --
 -- Buffering:
 --   order, reverse
-type ExecutionSegment = FilterSegment | MapSegment | WindowSegment | DistinctSegment | FlatMapSegment | OrderSegment | ReverseSegment | ConcatSegment -- one immutable step in a query's pipeline; compileStreaming composes these into a single Push chain
+type ExecutionSegment = FilterSegment | MapSegment | WindowSegment | DistinctSegment | FlatMapSegment | OrderSegment | ReverseSegment | ConcatSegment | IntersectSegment -- one immutable step in a query's pipeline; compileStreaming composes these into a single Push chain
 
 -- | Helper Functions | --
 const function isDictionary(t)
@@ -228,6 +235,12 @@ const function createReverseSegment() : ReverseSegment return { kind = "reverse"
 const function createConcatSegment(values : { any }) : ConcatSegment
 	return {
 		kind = "concat";
+		values = values
+	}
+end
+const function createIntersectSegment(values : { any }) : IntersectSegment
+	return {
+		kind = "intersect";
 		values = values
 	}
 end
@@ -790,6 +803,17 @@ const function compileStreaming(segments : { ExecutionSegment }, firstNDX : numb
 					if not nextPush(child) then return false end
 				end
 				return true
+			end
+		elseif segment.kind == "intersect" then
+			local values, lookUp : { [any] : boolean } = segment.values, {}
+			
+			for i = 1, #values do lookUp[values[i]] = true end
+			
+			push = function(value : any) : boolean
+				if lookUp[value] ~= true then return true end
+				
+				lookUp[value] = nil
+				return nextPush(value)
 			end
 		elseif segment.kind == "order" then error("Order segments cannot be compiled as streaming segments!") end
 	end
@@ -1674,6 +1698,40 @@ function LINQMethods.Aggregate<T, A>(self : LINQImpl & LINQ<T>, seed : A, accumu
 	end)
 
 	return result
+end
+
+--[=[
+	@within LINQ
+
+	Returns values that exist in both the current sequence and `values`.
+
+	Each matching value is returned once, preserving the order of its first
+	occurrence in the current sequence.
+
+	@param values {T}
+	@return LINQ<T>
+]=]
+function LINQMethods.Intersect<T>(self : LINQImpl & LINQ<T>, values : { T }) : LINQ<T>
+	if self._isEmpty == true or #values == 0 then return newLINQ(self._source, self._segments, true) end
+	
+	local segments = table.clone(self._segments)
+	table.insert(segments, createIntersectSegment(values))
+	
+	return newLINQ(self._source, segments, false)
+end
+
+--[=[
+	@within LINQ
+
+	Returns the distinct values from the current sequence followed by `values`.
+
+	Equivalent to `Concat(values):Distinct()`.
+
+	@param values {T}
+	@return LINQ<T>
+]=]
+function LINQMethods.Union<T>(self : LINQImpl & LINQ<T>, values : { T }) : LINQ<T>
+	return self:Concat(values):Distinct()
 end
 
 table.freeze(LINQMethods)
